@@ -150,14 +150,14 @@ class AnomalyCLIPModule(LightningModule):
                 count = 0
 
                 if self.trainer.datamodule.hparams.load_from_features:
-                    for nimage_features, nlabels, _, _ in loader:
+                    for nimage_features, nlabels, _, _, _ in loader:
                         nimage_features = nimage_features.view(-1, nimage_features.shape[-1])
                         nimage_features = nimage_features[: len(nlabels.squeeze())]
                         nimage_features = nimage_features.to(self.device)
                         embedding_sum += nimage_features.sum(dim=0)
                         count += nimage_features.shape[0]
                 else:
-                    for nimages, nlabels, _, _ in loader:
+                    for nimages, nlabels, _, _, _ in loader:
                         b, t, c, h, w = nimages.size()
                         nimages = nimages.view(-1, c, h, w)
                         nimages = nimages[: len(nlabels.squeeze())]
