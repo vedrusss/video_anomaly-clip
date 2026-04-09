@@ -4,7 +4,7 @@ FROM nvcr.io/nvidia/pytorch:22.11-py3
 RUN rm -rf /opt/pytorch  # remove 1.2GB dir
 
 # Install linux packages
-ENV DEBIAN_FRONTEND noninteractive
+ENV DEBIAN_FRONTEND=noninteractive
 RUN apt update
 RUN TZ=Etc/UTC apt install -y tzdata
 RUN apt install --no-install-recommends -y gcc git zip curl htop libgl1-mesa-glx libglib2.0-0 libpython3-dev gnupg ffmpeg libsm6 libxext6 python3-tk
@@ -22,7 +22,7 @@ WORKDIR /usr/src/app
 
 # Install python dependencies
 COPY requirements.txt .
-RUN python -m pip install --upgrade pip wheel
+RUN python -m pip install --no-cache-dir "pip==24.0" wheel
 RUN pip install --no-cache -r requirements.txt
 
 # Set environment variables

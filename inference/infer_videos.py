@@ -39,11 +39,20 @@ class VideoInferenceResult:
     video_path: Path
     summary: str
     preprocess_time_sec: float
+    encoding_time_sec: float
     classify_time_sec: float
+    selected_frames: int
+    encoded_frames: int
 
     @property
     def total_time_sec(self) -> float:
-        return self.preprocess_time_sec + self.classify_time_sec
+        return self.preprocess_time_sec + self.encoding_time_sec + self.classify_time_sec
+
+    @property
+    def frame_count_summary(self) -> str:
+        if self.selected_frames == self.encoded_frames:
+            return f"frames={self.selected_frames}"
+        return f"frames={self.selected_frames} selected, {self.encoded_frames} encoded"
 
 
 def main() -> None:
@@ -99,7 +108,7 @@ def main() -> None:
         )
         preprocess_end = now(device)
 
-        classify_start = preprocess_end
+        encoding_start = preprocess_end
         with torch.no_grad():
             features = extract_clip_features(
                 frames=video_batch.frames,
@@ -108,7 +117,10 @@ def main() -> None:
                 batch_size=args.batch_size,
                 normalize=args.normalize_features,
             )
+        encoding_end = now(device)
 
+        classify_start = encoding_end
+        with torch.no_grad():
             ncentroid = shared_ncentroid
             if ncentroid is None:
                 ncentroid = compute_ncentroid_from_features(features)
@@ -127,7 +139,6 @@ def main() -> None:
                 segment_size=video_batch.segment_size,
                 test_mode=True,
             )
-
             similarity = similarity[: video_batch.original_length]
             abnormal_scores = abnormal_scores[: video_batch.original_length]
             anomaly_class_probs = torch.softmax(similarity, dim=1) * abnormal_scores.unsqueeze(1)
@@ -156,7 +167,10 @@ def main() -> None:
                 video_path=video_path,
                 summary=summary,
                 preprocess_time_sec=preprocess_end - preprocess_start,
+                encoding_time_sec=encoding_end - encoding_start,
                 classify_time_sec=classify_end - classify_start,
+                selected_frames=video_batch.original_length,
+                encoded_frames=video_batch.padded_length,
             )
         )
 
@@ -168,16 +182,20 @@ def main() -> None:
     for result in results:
         print(
             f"{result.video_path.name}: "
+            f"{result.frame_count_summary}, "
             f"preprocess={format_duration(result.preprocess_time_sec)}, "
+            f"encoding={format_duration(result.encoding_time_sec)}, "
             f"classify={format_duration(result.classify_time_sec)}, "
             f"total={format_duration(result.total_time_sec)}"
         )
 
     avg_preprocess = sum(r.preprocess_time_sec for r in results) / len(results)
+    avg_encoding = sum(r.encoding_time_sec for r in results) / len(results)
     avg_classify = sum(r.classify_time_sec for r in results) / len(results)
     avg_total = sum(r.total_time_sec for r in results) / len(results)
 
     print(f"Average preprocess: {format_duration(avg_preprocess)}")
+    print(f"Average encoding: {format_duration(avg_encoding)}")
     print(f"Average classify: {format_duration(avg_classify)}")
     print(f"Average total: {format_duration(avg_total)}")
 

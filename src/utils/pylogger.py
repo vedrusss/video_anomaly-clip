@@ -1,6 +1,10 @@
 import logging
 
-from pytorch_lightning.utilities import rank_zero_only
+try:
+    from pytorch_lightning.utilities import rank_zero_only
+except Exception:  # pragma: no cover - training-only dependency is optional for inference
+    def rank_zero_only(fn):
+        return fn
 
 
 def get_pylogger(name=__name__) -> logging.Logger:
