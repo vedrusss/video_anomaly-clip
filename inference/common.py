@@ -4,6 +4,7 @@ import argparse
 import glob
 import math
 import time
+from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, List, Sequence
@@ -380,16 +381,28 @@ def preprocess_video(
 
 def extract_clip_features(
     frames: torch.Tensor,
-    net: "AnomalyCLIP",
+    net: "AnomalyCLIP" | None,
     device: torch.device,
     batch_size: int,
     normalize: bool,
+    image_encoder: torch.nn.Module | None = None,
+    amp: bool = False,
+    amp_dtype: torch.dtype = torch.float16,
 ) -> torch.Tensor:
+    encoder = image_encoder if image_encoder is not None else net.image_encoder if net is not None else None
+    if encoder is None:
+        raise ValueError("Either `net` or `image_encoder` must be provided.")
+
+    use_amp = amp and device.type == "cuda"
     feats = []
-    with torch.no_grad():
+    with torch.inference_mode():
         for start in range(0, frames.shape[0], batch_size):
-            batch = frames[start : start + batch_size].to(device)
-            encoded = net.image_encoder(batch.float())
+            batch = frames[start : start + batch_size].to(device=device, non_blocking=True)
+            autocast_ctx = (
+                torch.autocast(device_type="cuda", dtype=amp_dtype) if use_amp else nullcontext()
+            )
+            with autocast_ctx:
+                encoded = encoder(batch.float())
             if normalize:
                 encoded = F.normalize(encoded, dim=-1)
             feats.append(encoded)
