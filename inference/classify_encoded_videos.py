@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import argparse
 import glob
+import json
 import math
 import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, List, Sequence
+from typing import TYPE_CHECKING, List, Sequence, Set
 
 import pandas as pd
 import torch
@@ -90,6 +91,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--recursive",
         action="store_true",
         help="When an input is a directory, scan it recursively for cache files.",
+    )
+    parser.add_argument(
+        "--gt",
+        help="Optional path to ground-truth JSON in format {video_filename: threat_caption}.",
     )
     return parser
 
@@ -189,6 +194,20 @@ def pad_features_to_model_length(
     return padded, original_length, padded_length, segment_size
 
 
+def load_gt_abnormal_videos(gt_path: str) -> Set[str]:
+    gt_file = Path(gt_path).expanduser().resolve()
+    if not gt_file.is_file():
+        raise FileNotFoundError(f"Ground-truth JSON not found: {gt_file}")
+
+    with gt_file.open("r", encoding="utf-8") as f:
+        payload = json.load(f)
+
+    if not isinstance(payload, dict):
+        raise ValueError(f"Ground-truth JSON must be an object mapping video_filename to label: {gt_file}")
+
+    return {Path(str(video_name)).name for video_name in payload.keys()}
+
+
 def main() -> None:
     parser = build_arg_parser()
     args = parser.parse_args()
@@ -233,6 +252,9 @@ def main() -> None:
     cache_paths = resolve_cache_inputs(args.inputs, cache_ext=cache_ext, recursive=args.recursive)
     if not cache_paths:
         raise FileNotFoundError("No cache files matched the provided inputs.")
+
+    gt_abnormal_videos: Set[str] | None = load_gt_abnormal_videos(args.gt) if args.gt else None
+    predicted_abnormal_videos: Set[str] = set()
 
     results: List[EncodedVideoResult] = []
     total = len(cache_paths)
@@ -292,10 +314,13 @@ def main() -> None:
 
         elapsed = now(device) - item_start
 
+        resolved_video_name = Path(video_name).name
+
         if summary == "Normal":
             normal_videos += 1
         else:
             abnormal_videos += 1
+            predicted_abnormal_videos.add(resolved_video_name)
 
         print(f"{video_name} {idx} from {total}, {summary}.")
 
@@ -315,6 +340,18 @@ def main() -> None:
     print(f"Total execution time: {format_duration(total_time)}")
     print(f"Normal videos: {normal_videos}")
     print(f"Not-Normal videos: {abnormal_videos}")
+
+    if gt_abnormal_videos is not None:
+        tp = len(predicted_abnormal_videos & gt_abnormal_videos)
+        fp = len(predicted_abnormal_videos - gt_abnormal_videos)
+        fn = len(gt_abnormal_videos - predicted_abnormal_videos)
+
+        precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+        recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+        f1_score = (2 * precision * recall / (precision + recall)) if (precision + recall) > 0 else 0.0
+
+        print(f"TPs: {tp}, FPs: {fp}, FNs: {fn}")
+        print(f"Precision: {precision:.4f}, Recall: {recall:.4f}, F1 score: {f1_score:.4f}")
 
 
 if __name__ == "__main__":
